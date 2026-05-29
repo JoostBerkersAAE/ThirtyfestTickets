@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#ff6b6b">
+  <title>Thirty Fest — Ticket scanner</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: #f0ebe4;
+      color: #1a1a1a;
+      overflow: hidden;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      min-height: 100dvh;
+      transition: background 0.35s ease;
+    }
+
+    .app--success {
+      background: #22c55e;
+    }
+
+    header {
+      background: #ff6b6b;
+      color: #fff;
+      text-align: center;
+      padding: 1rem 1.25rem 1.25rem;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      margin: 0;
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    header p {
+      margin: 0.35rem 0 0;
+      font-size: 0.85rem;
+      opacity: 0.9;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem;
+      gap: 1rem;
+    }
+
+    #reader {
+      width: 100%;
+      max-width: 420px;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+      background: #1a1a1a;
+    }
+
+    #reader video {
+      border-radius: 16px;
+    }
+
+    .hint {
+      text-align: center;
+      font-size: 0.9rem;
+      color: #6b5c52;
+      max-width: 320px;
+      line-height: 1.5;
+    }
+
+    .btn {
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 999px;
+      padding: 0.85rem 1.75rem;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .btn:active { transform: scale(0.98); }
+
+    .btn--primary {
+      background: #ff6b6b;
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+    }
+
+    .btn--ghost {
+      background: transparent;
+      color: #6b5c52;
+      border: 1px solid #d4c8be;
+    }
+
+    .status {
+      font-size: 0.85rem;
+      color: #a09080;
+      text-align: center;
+      min-height: 1.25rem;
+    }
+
+    .status--error { color: #dc2626; }
+
+    /* Volledig groen scherm bij geldig ticket */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #22c55e;
+      color: #fff;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.3s ease, visibility 0.3s;
+    }
+
+    .overlay--visible {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+
+    .overlay__icon {
+      font-size: 5rem;
+      line-height: 1;
+      margin-bottom: 0.5rem;
+      animation: pop 0.4s ease;
+    }
+
+    .overlay h2 {
+      margin: 0;
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .overlay p {
+      margin: 0.5rem 0 0;
+      font-size: 1.1rem;
+      opacity: 0.95;
+    }
+
+    .overlay .btn {
+      margin-top: 2rem;
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+      border: 2px solid rgba(255, 255, 255, 0.6);
+    }
+
+    @keyframes pop {
+      0% { transform: scale(0.5); opacity: 0; }
+      70% { transform: scale(1.1); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .app--success header,
+    .app--success main .hint,
+    .app--success #reader,
+    .app--success .btn--primary,
+    .app--success .status {
+      visibility: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <h1>Thirty Fest 2026</h1>
+      <p>Ticket scanner — richt de camera op de QR-code</p>
+    </header>
+
+    <main>
+      <div id="reader"></div>
+      <p class="hint" id="hint">Druk op start om de camera te openen. Houd de QR-code uit de uitnodigingsmail in beeld.</p>
+      <button type="button" class="btn btn--primary" id="startBtn">Camera starten</button>
+      <button type="button" class="btn btn--ghost" id="stopBtn" hidden>Camera stoppen</button>
+      <p class="status" id="status" aria-live="polite"></p>
+    </main>
+  </div>
+
+  <div class="overlay" id="successOverlay" role="alert" aria-live="assertive">
+    <div class="overlay__icon" aria-hidden="true">✓</div>
+    <h2>Geldig ticket</h2>
+    <p>Welkom bij Thirty Fest!</p>
+    <button type="button" class="btn" id="resetBtn">Volgende scan</button>
+  </div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    const VALID_CODE = 'thirtyfest';
+    const COOLDOWN_MS = 2500;
+
+    const app = document.getElementById('app');
+    const readerEl = document.getElementById('reader');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const statusEl = document.getElementById('status');
+    const hintEl = document.getElementById('hint');
+    const overlay = document.getElementById('successOverlay');
+
+    let scanner = null;
+    let locked = false;
+    let audioCtx = null;
+
+    function normalize(text) {
+      return (text || '').trim().toLowerCase();
+    }
+
+    function playSuccessSound() {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = audioCtx;
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.1);
+        osc.frequency.setValueAtTime(783.99, now + 0.2);
+
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.35, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      } catch (e) {
+        console.warn('Geluid kon niet worden afgespeeld:', e);
+      }
+    }
+
+    function showSuccess() {
+      app.classList.add('app--success');
+      overlay.classList.add('overlay--visible');
+      playSuccessSound();
+      if (navigator.vibrate) {
+        navigator.vibrate([80, 40, 80]);
+      }
+    }
+
+    function hideSuccess() {
+      app.classList.remove('app--success');
+      overlay.classList.remove('overlay--visible');
+    }
+
+    function setStatus(msg, isError) {
+      statusEl.textContent = msg;
+      statusEl.classList.toggle('status--error', !!isError);
+    }
+
+    async function onScanSuccess(decodedText) {
+      if (locked) return;
+
+      const value = normalize(decodedText);
+
+      if (value === VALID_CODE) {
+        locked = true;
+        setStatus('');
+        showSuccess();
+        await stopScanner();
+        return;
+      }
+
+      setStatus('Ongeldige QR-code — geen Thirty Fest ticket', true);
+      locked = true;
+      setTimeout(() => {
+        locked = false;
+        setStatus('');
+      }, COOLDOWN_MS);
+    }
+
+    async function startScanner() {
+      setStatus('');
+      hideSuccess();
+      locked = false;
+
+      if (!scanner) {
+        scanner = new Html5Qrcode('reader');
+      }
+
+      startBtn.hidden = true;
+      hintEl.textContent = 'Scan de QR-code op het ticket…';
+      stopBtn.hidden = false;
+
+      try {
+        await scanner.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: (viewfinderWidth, viewfinderHeight) => {
+              const size = Math.min(viewfinderWidth, viewfinderHeight) * 0.75;
+              return { width: size, height: size };
+            },
+          },
+          onScanSuccess,
+          () => {}
+        );
+      } catch (err) {
+        console.error(err);
+        startBtn.hidden = false;
+        stopBtn.hidden = true;
+        hintEl.textContent = 'Sta cameratoegang toe in je browser en probeer opnieuw.';
+        setStatus(
+          err.name === 'NotAllowedError'
+            ? 'Cameratoegang geweigerd'
+            : 'Camera kon niet worden gestart',
+          true
+        );
+      }
+    }
+
+    async function stopScanner() {
+      if (scanner && scanner.isScanning) {
+        try {
+          await scanner.stop();
+          await scanner.clear();
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+      startBtn.hidden = false;
+      stopBtn.hidden = true;
+      hintEl.textContent = 'Druk op start om de camera te openen. Houd de QR-code uit de uitnodigingsmail in beeld.';
+    }
+
+    startBtn.addEventListener('click', startScanner);
+    stopBtn.addEventListener('click', stopScanner);
+
+    resetBtn.addEventListener('click', async () => {
+      hideSuccess();
+      locked = false;
+      setStatus('');
+      await startScanner();
+    });
+  </script>
+</body>
+</html>
