@@ -25,9 +25,9 @@
       transition: background 0.35s ease;
     }
 
-    .app--success {
-      background: #22c55e;
-    }
+    .app--result-success { background: #22c55e; }
+    .app--result-vip { background: linear-gradient(160deg, #7c3aed 0%, #d97706 100%); }
+    .app--result-error { background: #dc2626; }
 
     header {
       background: #ff6b6b;
@@ -114,7 +114,7 @@
 
     .status--error { color: #dc2626; }
 
-    /* Volledig groen scherm bij geldig ticket */
+    /* Volledig scherm bij scan-resultaat */
     .overlay {
       position: fixed;
       inset: 0;
@@ -123,13 +123,16 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #22c55e;
       color: #fff;
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
       transition: opacity 0.3s ease, visibility 0.3s;
     }
+
+    .overlay--success { background: #22c55e; }
+    .overlay--vip { background: linear-gradient(160deg, #7c3aed 0%, #d97706 100%); }
+    .overlay--error { background: #dc2626; }
 
     .overlay--visible {
       opacity: 1;
@@ -164,17 +167,31 @@
       border: 2px solid rgba(255, 255, 255, 0.6);
     }
 
+    .overlay__badge {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.4rem 1rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.45);
+    }
+
     @keyframes pop {
       0% { transform: scale(0.5); opacity: 0; }
       70% { transform: scale(1.1); }
       100% { transform: scale(1); opacity: 1; }
     }
 
-    .app--success header,
-    .app--success main .hint,
-    .app--success #reader,
-    .app--success .btn--primary,
-    .app--success .status {
+    .app--result header,
+    .app--result main .hint,
+    .app--result #reader,
+    .app--result .btn--primary,
+    .app--result .btn--ghost,
+    .app--result .status {
       visibility: hidden;
     }
   </style>
@@ -195,26 +212,63 @@
     </main>
   </div>
 
-  <div class="overlay" id="successOverlay" role="alert" aria-live="assertive">
-    <div class="overlay__icon" aria-hidden="true">✓</div>
-    <h2>Geldig ticket</h2>
-    <p>Welkom bij Thirty Fest!</p>
+  <div class="overlay" id="resultOverlay" role="alert" aria-live="assertive">
+    <div class="overlay__icon" id="overlayIcon" aria-hidden="true">✓</div>
+    <h2 id="overlayTitle">Geldig ticket</h2>
+    <p id="overlayMessage">Welkom bij Thirty Fest!</p>
+    <span class="overlay__badge" id="overlayBadge" hidden></span>
     <button type="button" class="btn" id="resetBtn">Volgende scan</button>
   </div>
 
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script>
-    const VALID_CODE = 'thirtyfest';
-    const COOLDOWN_MS = 2500;
+    const CODE_REGULAR = 'thirtyfest';
+    const CODE_VIP = 'thirtyfest2026';
+
+    const RESULT = {
+      regular: {
+        appClass: 'app--result-success',
+        overlayClass: 'overlay--success',
+        icon: '✓',
+        title: 'Geldig ticket',
+        message: 'Welkom bij Thirty Fest!',
+        badge: null,
+        sound: 'regular',
+        vibrate: [80, 40, 80],
+      },
+      vip: {
+        appClass: 'app--result-vip',
+        overlayClass: 'overlay--vip',
+        icon: '★',
+        title: 'VIP gast',
+        message: 'Welkom bij Thirty Fest!',
+        badge: 'VIP toegang',
+        sound: 'vip',
+        vibrate: [60, 30, 60, 30, 120],
+      },
+      invalid: {
+        appClass: 'app--result-error',
+        overlayClass: 'overlay--error',
+        icon: '✕',
+        title: 'Ongeldig ticket',
+        message: 'Deze QR-code hoort niet bij Thirty Fest.',
+        badge: null,
+        sound: 'error',
+        vibrate: [200, 100, 200],
+      },
+    };
 
     const app = document.getElementById('app');
-    const readerEl = document.getElementById('reader');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const resetBtn = document.getElementById('resetBtn');
     const statusEl = document.getElementById('status');
     const hintEl = document.getElementById('hint');
-    const overlay = document.getElementById('successOverlay');
+    const overlay = document.getElementById('resultOverlay');
+    const overlayIcon = document.getElementById('overlayIcon');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlayMessage = document.getElementById('overlayMessage');
+    const overlayBadge = document.getElementById('overlayBadge');
 
     let scanner = null;
     let locked = false;
@@ -224,50 +278,83 @@
       return (text || '').trim().toLowerCase();
     }
 
-    function playSuccessSound() {
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    function playTone(freq, start, duration, type, volume) {
+      const ctx = getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(volume, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration + 0.05);
+    }
+
+    function playSound(kind) {
       try {
-        if (!audioCtx) {
-          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = getAudioContext();
+        const t = ctx.currentTime;
+
+        if (kind === 'regular') {
+          // Twee vrolijke "dings" (hoger dan voorheen)
+          playTone(880, t, 0.12, 'triangle', 0.4);
+          playTone(1174.66, t + 0.14, 0.18, 'triangle', 0.45);
+        } else if (kind === 'vip') {
+          // Feestelijk arpeggio
+          [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+            playTone(freq, t + i * 0.1, 0.22, 'sine', 0.38);
+          });
+        } else if (kind === 'error') {
+          // Lage dubbele buzz
+          playTone(180, t, 0.2, 'square', 0.22);
+          playTone(140, t + 0.28, 0.25, 'square', 0.22);
         }
-        const ctx = audioCtx;
-        if (ctx.state === 'suspended') {
-          ctx.resume();
-        }
-
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(523.25, now);
-        osc.frequency.setValueAtTime(659.25, now + 0.1);
-        osc.frequency.setValueAtTime(783.99, now + 0.2);
-
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.35, now + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.5);
       } catch (e) {
         console.warn('Geluid kon niet worden afgespeeld:', e);
       }
     }
 
-    function showSuccess() {
-      app.classList.add('app--success');
-      overlay.classList.add('overlay--visible');
-      playSuccessSound();
+    function showResult(type) {
+      const cfg = RESULT[type];
+      app.className = 'app app--result ' + cfg.appClass;
+      overlay.className = 'overlay ' + cfg.overlayClass + ' overlay--visible';
+      overlayIcon.textContent = cfg.icon;
+      overlayTitle.textContent = cfg.title;
+      overlayMessage.textContent = cfg.message;
+      if (cfg.badge) {
+        overlayBadge.textContent = cfg.badge;
+        overlayBadge.hidden = false;
+      } else {
+        overlayBadge.hidden = true;
+      }
+      playSound(cfg.sound);
       if (navigator.vibrate) {
-        navigator.vibrate([80, 40, 80]);
+        navigator.vibrate(cfg.vibrate);
       }
     }
 
-    function hideSuccess() {
-      app.classList.remove('app--success');
-      overlay.classList.remove('overlay--visible');
+    function hideResult() {
+      app.className = 'app';
+      overlay.className = 'overlay';
+    }
+
+    function resolveScanType(value) {
+      if (value === CODE_VIP) return 'vip';
+      if (value === CODE_REGULAR) return 'regular';
+      return 'invalid';
     }
 
     function setStatus(msg, isError) {
@@ -279,26 +366,17 @@
       if (locked) return;
 
       const value = normalize(decodedText);
+      const type = resolveScanType(value);
 
-      if (value === VALID_CODE) {
-        locked = true;
-        setStatus('');
-        showSuccess();
-        await stopScanner();
-        return;
-      }
-
-      setStatus('Ongeldige QR-code — geen Thirty Fest ticket', true);
       locked = true;
-      setTimeout(() => {
-        locked = false;
-        setStatus('');
-      }, COOLDOWN_MS);
+      setStatus('');
+      showResult(type);
+      await stopScanner();
     }
 
     async function startScanner() {
       setStatus('');
-      hideSuccess();
+      hideResult();
       locked = false;
 
       if (!scanner) {
@@ -354,7 +432,7 @@
     stopBtn.addEventListener('click', stopScanner);
 
     resetBtn.addEventListener('click', async () => {
-      hideSuccess();
+      hideResult();
       locked = false;
       setStatus('');
       await startScanner();
